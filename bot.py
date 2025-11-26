@@ -1,4 +1,4 @@
-# bot_two_way.py  ← LONG + SHORT နှစ်ဖက်စလုံး ပါပြီ!
+# sol_avax_scalper.py  ← အခု ချက်ချင်း run ပါ!
 import ccxt.async_support as ccxt
 import asyncio
 import time
@@ -10,7 +10,9 @@ exchange = ccxt.binance({
     'timeout': 10000,
 })
 
-SYMBOLS = ['BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT', 'AVAX/USDT:USDT']
+# အခု လိုချင်တာ SOL နဲ့ AVAX ပဲ
+SYMBOLS = ['SOL/USDT:USDT', 'AVAX/USDT:USDT']
+
 balance = 500.0
 initial_balance = balance
 positions = {}
@@ -22,57 +24,66 @@ async def get_price(sym):
 
 async def bot():
     global balance
-    print("TWO-WAY SCALPER STARTED - LONG + SHORT နှစ်ဖက်စလုံး ပါပြီ!")
+    print("SOL + AVAX ONLY SCALPER STARTED - နှစ်ဖက်စလုံး စားမယ်!")
 
     while True:
         try:
             for sym in SYMBOLS:
-                if sym in positions or len(positions) >= 8:
+                if sym in positions or len(positions) >= 6:
                     continue
-                if sym in last_trade and time.time() - last_trade[sym] < 9:
+                if sym in last_trade and time.time() - last_trade[sym] < 8:
                     continue
 
                 price = await get_price(sym)
+                coin = sym.split('/')[0]
 
-                # LONG conditions (ဈေးချိုးပြီး ပြန်တက်မယ့် နေရာ)
-                if ("AVAX" in sym and price < 12.08) or \
-                   ("SOL" in sym and price < 162) or \
-                   ("ETH" in sym and price < 2580):
-                    positions[sym] = {'side': 'LONG', 'entry': price, 'time': time.time()}
-                    last_trade[sym] = time.time()
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] LONG  {sym.split('/')[0]} @ {price:.4f}")
+                # === AVAX ===
+                if coin == "AVAX":
+                    if price <= 12.05:                                      # အရမ်းချိုး → LONG
+                        positions[sym] = {'side': 'LONG', 'entry': price, 'time': time.time()}
+                        last_trade[sym] = time.time()
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] LONG  AVAX @ {price:.4f}")
 
-                # SHORT conditions (ဈေးကျိုးပြီး ပြန်ကျမယ့် နေရာ)
-                elif ("BTC" in sym and price > 95200) or \
-                     ("AVAX" in sym and price > 12.65) or \
-                     ("SOL" in sym and price > 178) or \
-                     ("ETH" in sym and price > 2720):
-                    positions[sym] = {'side': 'SHORT', 'entry': price, 'time': time.time()}
-                    last_trade[sym] = time.time()
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] SHORT {sym.split('/')[0]} @ {price:.4f}")
+                    elif price >= 12.72:                                    # အရမ်းတက် → SHORT
+                        positions[sym] = {'side': 'SHORT', 'entry': price, 'time': time.time()}
+                        last_trade[sym] = time.time()
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] SHORT AVAX @ {price:.4f}")
 
-            # Exit logic (TP +0.72%, SL -0.34%, max 42 sec)
+                # === SOL ===
+                if coin == "SOL":
+                    if price <= 162.0:                                      # oversold → LONG
+                        positions[sym] = {'side': 'LONG', 'entry': price, 'time': time.time()}
+                        last_trade[sym] = time.time()
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] LONG  SOL @ {price:.2f}")
+
+                    elif price >= 178.5:                                    # overbought → SHORT
+                        positions[sym] = {'side': 'SHORT', 'entry': price, 'time': time.time()}
+                        last_trade[sym] = time.time()
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] SHORT SOL @ {price:.2f}")
+
+            # === Exit ===
             remove = []
             for sym, pos in positions.items():
                 price = await get_price(sym)
                 pnl_pct = (price - pos['entry']) / pos['entry'] * (1 if pos['side']=='LONG' else -1) * 100
                 held = time.time() - pos['time']
 
-                if pnl_pct >= 0.72 or pnl_pct <= -0.34 or held > 42:
-                    profit_usd = 35 * 20 * (pnl_pct / 100) * 0.998   # $35 × 20x
-                    balance += profit_usd
-                    status = "WIN" if profit_usd > 0 else "LOSS"
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] {status} {sym.split('/')[0]} +${profit_usd:+.2f} → ${balance:.1f}")
+                if pnl_pct >= 0.78 or pnl_pct <= -0.33 or held > 48:   # TP +0.78%  SL -0.33%  max 48s
+                    profit = 35 * 20 * (pnl_pct / 100) * 0.998          # $35 × 20x
+                    balance += profit
+                    status = "WIN" if profit > 0 else "LOSS"
+                    coin = sym.split('/')[0]
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] {status} {coin} +${profit:+.2f} → Balance ${balance:.1f}")
                     remove.append(sym)
 
             for s in remove:
                 del positions[s]
 
-            if int(time.time()) % 18 == 0:
+            if int(time.time()) % 20 == 0:
                 daily = (balance / initial_balance - 1) * 100
                 print(f"BALANCE ${balance:.1f} | Today +{daily:+.2f}% | Open {len(positions)}")
 
-            await asyncio.sleep(1.3)
+            await asyncio.sleep(1.2)
 
         except Exception as e:
             print("Error:", e)
