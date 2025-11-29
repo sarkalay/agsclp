@@ -803,8 +803,8 @@ def get_current_price(self, pair):
                 continue
     
     fallback_prices = {
-        "SOLUSDT": 140.0, "BTCUSDT": 45000.0, "ETHUSDT": 2500.0,
-        "ADAUSDT": 0.5, "MATICUSDT": 0.8
+        "SOLUSDT": 137.0, "AVAXUSDT": 15.0, "ASTERUSDT": 1.1,
+        "PENGUUSDT": 0.01125
     }
     return fallback_prices.get(pair, 100.0)
 
@@ -1401,7 +1401,7 @@ class FreedomAIPaperTrader:
         self.paper_positions = {}
         self.paper_history_file = "freedom_ai_paper_trading_history.json"
         self.paper_history = self.load_paper_history()
-        self.available_pairs = ["SOLUSDT", "BTCUSDT", "ETHUSDT", "ADAUSDT", "MATICUSDT"]
+        self.available_pairs = ["SOLUSDT", "AVAXUSDT", "ASTERUSDT", "PENGUUSDT"]
         self.max_concurrent_trades = 6
         self.ai_aggressiveness = "BALANCED"
         
