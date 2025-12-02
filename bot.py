@@ -1937,7 +1937,7 @@ class FullyAutonomous1HourPaperTrader:
             return False
 
     def get_ai_close_decision_v2(self, pair, trade):
-    """BOUNCE-PROOF 3-LAYER EXIT V2 + PEAK-HARVEST LOGIC – PAPER TRADING VERSION"""
+        """BOUNCE-PROOF 3-LAYER EXIT V2 + PEAK-HARVEST LOGIC – PAPER TRADING VERSION"""
     try:
         current_price = self.real_bot.get_current_price(pair)
         current_pnl = self.calculate_current_pnl(trade, current_price)
