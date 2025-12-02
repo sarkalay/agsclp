@@ -181,6 +181,14 @@ def _initialize_trading(self):
     # NEW: Monitoring interval (3 minute)
     self.monitoring_interval = 180  # 3 minute in seconds
     
+    # NEW: Peak Harvest settings
+    self.peak_harvest_enabled = True  # Enable Peak Harvest logic
+    self.peak_harvest_thresholds = [
+        {'threshold': 8.0, 'percent': 50},
+        {'threshold': 10.0, 'percent': 60},
+        {'threshold': 12.0, 'percent': 70}
+    ]
+    
     # Validate APIs before starting
     self.validate_api_keys()
     
@@ -191,6 +199,7 @@ def _initialize_trading(self):
         self.print_color(f"💰 TOTAL BUDGET: ${self.total_budget}", self.Fore.GREEN + self.Style.BRIGHT)
         self.print_color(f"🔄 REVERSE POSITION FEATURE: ENABLED", self.Fore.MAGENTA + self.Style.BRIGHT)
         self.print_color(f"🎯 BOUNCE-PROOF 3-LAYER EXIT V2: ENABLED", self.Fore.YELLOW + self.Style.BRIGHT)
+        self.print_color(f"🚀 PEAK-HARVEST LOGIC: ENABLED", self.Fore.GREEN + self.Style.BRIGHT)
         self.print_color(f"⏰ MONITORING: 3 MINUTE INTERVAL", self.Fore.RED + self.Style.BRIGHT)
         self.print_color(f"📊 Max Positions: {self.max_concurrent_trades}", self.Fore.YELLOW + self.Style.BRIGHT)
         if LEARN_SCRIPT_AVAILABLE:
@@ -1194,6 +1203,7 @@ def execute_ai_trade(self, pair, ai_decision):
         self.print_color(f"ENTRY PRICE: ${entry_price:.4f}", self.Fore.WHITE)
         self.print_color(f"QUANTITY: {quantity}", self.Fore.CYAN)
         self.print_color(f"🎯 BOUNCE-PROOF 3-LAYER EXIT V2 ACTIVE", self.Fore.YELLOW + self.Style.BRIGHT)
+        self.print_color(f"🚀 PEAK-HARVEST LOGIC: ENABLED", self.Fore.GREEN + self.Style.BRIGHT)
         self.print_color(f"CONFIDENCE: {confidence}%", self.Fore.YELLOW + self.Style.BRIGHT)
         self.print_color(f"REASONING: {reasoning}", self.Fore.WHITE)
         self.print_color("=" * 80, self.Fore.CYAN)
@@ -1234,11 +1244,12 @@ def execute_ai_trade(self, pair, ai_decision):
             'ai_reasoning': reasoning,
             'entry_time_th': self.get_thailand_time(),
             'has_tp_sl': False,  # NEW: Mark as no TP/SL
-            'peak_pnl': 0  # NEW: For 3-layer system
+            'peak_pnl': 0,  # NEW: For 3-layer system
+            'peak_harvested': False  # NEW: For Peak-Harvest logic
         }
         
-        self.print_color(f"✅ TRADE EXECUTED (BOUNCE-PROOF V2): {pair} {decision} | Leverage: {leverage}x", self.Fore.GREEN + self.Style.BRIGHT)
-        self.print_color(f"📊 AI will monitor with Bounce-Proof 3-Layer Exit System", self.Fore.BLUE)
+        self.print_color(f"✅ TRADE EXECUTED (BOUNCE-PROOF V2 + PEAK-HARVEST): {pair} {decision} | Leverage: {leverage}x", self.Fore.GREEN + self.Style.BRIGHT)
+        self.print_color(f"📊 AI will monitor with Bounce-Proof 3-Layer Exit System + Peak-Harvest Logic", self.Fore.BLUE)
         return True
         
     except Exception as e:
@@ -1258,34 +1269,35 @@ def get_ai_close_decision_v2(self, pair, trade):
             trade['peak_pnl'] = current_pnl
         
         peak = trade['peak_pnl']
-        
+
         # ==================== 🆕 PEAK-HARVEST LOGIC ====================
-        # မင်းပြောသလို Peak ရောက်တာနဲ့ 50-70% ချက်ချင်းပိတ်မယ်
-        peak_margin_pct = (peak / 100)  # margin ပေါ် % ကို ပြန်တွက်
-        
-        if not trade.get('peak_harvested', False):
+        # Peak ရောက်တာနဲ့ 50-70% ချက်ချင်းပိတ်မယ်
+        if self.peak_harvest_enabled and not trade.get('peak_harvested', False):
             if peak >= 12.0:  # 12% ကျော်ရင်
+                trade['peak_harvested'] = True
                 return {
                     "should_close": True,
                     "partial_percent": 70,
                     "close_type": "PEAK_HARVEST_70",
-                    "reason": f"PEAK HARVEST: +{peak:.1f}% → 70% ချက်ချင်းပိတ်!",
+                    "reason": f"🚀 PEAK HARVEST: +{peak:.1f}% → 70% ချက်ချင်းပိတ်!",
                     "confidence": 100
                 }
             elif peak >= 10.0:  # 10% ကျော်ရင်
+                trade['peak_harvested'] = True
                 return {
                     "should_close": True,
                     "partial_percent": 60,
                     "close_type": "PEAK_HARVEST_60",
-                    "reason": f"PEAK HARVEST: +{peak:.1f}% → 60% ချက်ချင်းပိတ်!",
+                    "reason": f"🚀 PEAK HARVEST: +{peak:.1f}% → 60% ချက်ချင်းပိတ်!",
                     "confidence": 100
                 }
             elif peak >= 8.0:  # 8% ကျော်ရင်
+                trade['peak_harvested'] = True
                 return {
                     "should_close": True,
                     "partial_percent": 50,
                     "close_type": "PEAK_HARVEST_50",
-                    "reason": f"PEAK HARVEST: +{peak:.1f}% → 50% ချက်ချင်းပိတ်!",
+                    "reason": f"🚀 PEAK HARVEST: +{peak:.1f}% → 50% ချက်ချင်းပိတ်!",
                     "confidence": 100
                 }
         # ==================== PEAK-HARVEST END ====================
@@ -1373,16 +1385,16 @@ def get_ai_close_decision_v2(self, pair, trade):
         return {"should_close": False}
 
 def monitor_positions(self):
-    """Monitor positions and ask AI when to close (3-LAYER SYSTEM)"""
+    """Monitor positions and ask AI when to close (3-LAYER SYSTEM + PEAK-HARVEST)"""
     try:
         closed_trades = []
         for pair, trade in list(self.ai_opened_trades.items()):
             if trade['status'] != 'ACTIVE':
                 continue
             
-            # NEW: Ask AI whether to close this position using 3-Layer system
+            # NEW: Ask AI whether to close this position using 3-Layer system + Peak-Harvest
             if not trade.get('has_tp_sl', True):
-                self.print_color(f"🔍 Bounce-Proof V2 Checking {pair}...", self.Fore.BLUE)
+                self.print_color(f"🔍 Bounce-Proof V2 + Peak-Harvest Checking {pair}...", self.Fore.BLUE)
                 close_decision = self.get_ai_close_decision_v2(pair, trade)
                 
                 if close_decision.get("should_close", False):
@@ -1392,9 +1404,9 @@ def monitor_positions(self):
                     partial_percent = close_decision.get("partial_percent", 100)
                     
                     # 🆕 Use 3-Layer system's ACTUAL reasoning for closing
-                    full_close_reason = f"BOUNCE-PROOF V2: {close_type} - {reasoning}"
+                    full_close_reason = f"BOUNCE-PROOF V2 + PEAK-HARVEST: {close_type} - {reasoning}"
                     
-                    self.print_color(f"🎯 Bounce-Proof V2 Decision: CLOSE {pair}", self.Fore.YELLOW + self.Style.BRIGHT)
+                    self.print_color(f"🎯 Bounce-Proof V2 + Peak-Harvest Decision: CLOSE {pair}", self.Fore.YELLOW + self.Style.BRIGHT)
                     self.print_color(f"📝 Close Type: {close_type} | Partial: {partial_percent}%", self.Fore.CYAN)
                     self.print_color(f"💡 Confidence: {confidence}% | Reasoning: {reasoning}", self.Fore.WHITE)
                     
@@ -1406,13 +1418,13 @@ def monitor_positions(self):
                     # Show 3-Layer system's decision to hold with reasoning
                     if close_decision.get('confidence', 0) > 0:
                         reasoning = close_decision.get('reasoning', 'No reason provided')
-                        self.print_color(f"🔍 Bounce-Proof V2 wants to HOLD {pair} (Confidence: {close_decision.get('confidence', 0)}%)", self.Fore.GREEN)
+                        self.print_color(f"🔍 Bounce-Proof V2 + Peak-Harvest wants to HOLD {pair} (Confidence: {close_decision.get('confidence', 0)}%)", self.Fore.GREEN)
                         self.print_color(f"📝 Hold Reasoning: {reasoning}", self.Fore.WHITE)
                 
         return closed_trades
                 
     except Exception as e:
-        self.print_color(f"Bounce-Proof V2 Monitoring error: {e}", self.Fore.RED)
+        self.print_color(f"Bounce-Proof V2 + Peak-Harvest Monitoring error: {e}", self.Fore.RED)
         return []
 
 def display_dashboard(self):
@@ -1420,6 +1432,7 @@ def display_dashboard(self):
     self.print_color(f"\n🤖 AI TRADING DASHBOARD - {self.get_thailand_time()}", self.Fore.CYAN + self.Style.BRIGHT)
     self.print_color("=" * 90, self.Fore.CYAN)
     self.print_color(f"🎯 MODE: BOUNCE-PROOF 3-LAYER EXIT V2", self.Fore.YELLOW + self.Style.BRIGHT)
+    self.print_color(f"🚀 PEAK-HARVEST LOGIC: ENABLED", self.Fore.GREEN + self.Style.BRIGHT)
     self.print_color(f"⏰ MONITORING: 3 MINUTE INTERVAL", self.Fore.RED + self.Style.BRIGHT)
     
     # === MTF SUMMARY ===
@@ -1461,7 +1474,7 @@ def display_dashboard(self):
             self.print_color(f"   Size: ${trade['position_size_usd']:.2f} | Leverage: {trade['leverage']}x ⚡", self.Fore.WHITE)
             self.print_color(f"   Entry: ${trade['entry_price']:.4f} | Current: ${current_price:.4f}", self.Fore.WHITE)
             self.print_color(f"   P&L: ${unrealized_pnl:.2f}", pnl_color)
-            self.print_color(f"   🎯 BOUNCE-PROOF V2 EXIT ACTIVE", self.Fore.YELLOW)
+            self.print_color(f"   🎯 BOUNCE-PROOF V2 + PEAK-HARVEST ACTIVE", self.Fore.YELLOW)
             self.print_color("   " + "-" * 60, self.Fore.CYAN)
     
     if active_count == 0:
@@ -1555,9 +1568,9 @@ def show_advanced_learning_progress(self):
         self.print_color(f"\n🧠 Learning module not available", self.Fore.YELLOW)
 
 def run_trading_cycle(self):
-    """Run trading cycle with REVERSE position checking and 3-LAYER EXIT"""
+    """Run trading cycle with REVERSE position checking and 3-LAYER EXIT + PEAK-HARVEST"""
     try:
-        # First monitor and ask AI to close positions using 3-Layer system
+        # First monitor and ask AI to close positions using 3-Layer system + Peak-Harvest
         self.monitor_positions()
         self.display_dashboard()
         
@@ -1602,11 +1615,12 @@ def run_trading_cycle(self):
         self.print_color(f"Trading cycle error: {e}", self.Fore.RED)
 
 def start_trading(self):
-    """Start trading with REVERSE position feature and 3-LAYER EXIT"""
-    self.print_color("🚀 STARTING AI TRADER WITH BOUNCE-PROOF 3-LAYER EXIT V2!", self.Fore.CYAN + self.Style.BRIGHT)
+    """Start trading with REVERSE position feature and 3-LAYER EXIT + PEAK-HARVEST"""
+    self.print_color("🚀 STARTING AI TRADER WITH BOUNCE-PROOF 3-LAYER EXIT V2 + PEAK-HARVEST!", self.Fore.CYAN + self.Style.BRIGHT)
     self.print_color("💰 AI MANAGING $500 PORTFOLIO", self.Fore.GREEN + self.Style.BRIGHT)
     self.print_color("🔄 REVERSE POSITION: ENABLED (AI can flip losing positions)", self.Fore.MAGENTA + self.Style.BRIGHT)
     self.print_color("🎯 BOUNCE-PROOF 3-LAYER EXIT V2: ACTIVE", self.Fore.YELLOW + self.Style.BRIGHT)
+    self.print_color("🚀 PEAK-HARVEST LOGIC: ACTIVE (Peak ရောက်တာနဲ့ 50-70% ချက်ချင်းပိတ်)", self.Fore.GREEN + self.Style.BRIGHT)
     self.print_color("⏰ MONITORING: 3 MINUTE INTERVAL", self.Fore.RED + self.Style.BRIGHT)
     self.print_color("⚡ LEVERAGE: 5x to 10x", self.Fore.RED + self.Style.BRIGHT)
     if LEARN_SCRIPT_AVAILABLE:
@@ -1616,10 +1630,10 @@ def start_trading(self):
     while True:
         try:
             self.cycle_count += 1
-            self.print_color(f"\n🔄 TRADING CYCLE {self.cycle_count} (BOUNCE-PROOF V2)", self.Fore.CYAN + self.Style.BRIGHT)
+            self.print_color(f"\n🔄 TRADING CYCLE {self.cycle_count} (BOUNCE-PROOF V2 + PEAK-HARVEST)", self.Fore.CYAN + self.Style.BRIGHT)
             self.print_color("=" * 60, self.Fore.CYAN)
             self.run_trading_cycle()
-            self.print_color(f"⏳ Next Bounce-Proof V2 analysis in 3 minute...", self.Fore.BLUE)
+            self.print_color(f"⏳ Next Bounce-Proof V2 + Peak-Harvest analysis in 3 minute...", self.Fore.BLUE)
             time.sleep(self.monitoring_interval)  # 3 minute
             
         except KeyboardInterrupt:
@@ -1650,7 +1664,7 @@ methods = [
 for method in methods:
     setattr(FullyAutonomous1HourAITrader, method.__name__, method)
 
-# Paper trading class - Uses REAL Binance data only
+# Paper trading class - Uses REAL Binance data only with PEAK-HARVEST
 class FullyAutonomous1HourPaperTrader:
     def __init__(self, real_bot):
         self.real_bot = real_bot
@@ -1662,6 +1676,9 @@ class FullyAutonomous1HourPaperTrader:
         
         # Copy reverse position settings
         self.allow_reverse_positions = True
+        
+        # NEW: Peak Harvest settings for paper trading
+        self.peak_harvest_enabled = True
         
         # NEW: Monitoring interval (3 minute)
         self.monitoring_interval = 180  # 3 minute in seconds
@@ -1678,6 +1695,7 @@ class FullyAutonomous1HourPaperTrader:
         self.real_bot.print_color(f"💰 Virtual Budget: ${self.paper_balance}", self.Fore.CYAN + self.Style.BRIGHT)
         self.real_bot.print_color(f"🔄 REVERSE POSITION FEATURE: ENABLED", self.Fore.MAGENTA + self.Style.BRIGHT)
         self.real_bot.print_color(f"🎯 BOUNCE-PROOF 3-LAYER EXIT V2: ENABLED", self.Fore.YELLOW + self.Style.BRIGHT)
+        self.real_bot.print_color(f"🚀 PEAK-HARVEST LOGIC: ENABLED", self.Fore.GREEN + self.Style.BRIGHT)
         self.real_bot.print_color(f"⏰ MONITORING: 3 MINUTE INTERVAL", self.Fore.RED + self.Style.BRIGHT)
         self.real_bot.print_color(f"📡 USING REAL BINANCE MARKET DATA", self.Fore.BLUE + self.Style.BRIGHT)
     
@@ -1938,130 +1956,120 @@ class FullyAutonomous1HourPaperTrader:
 
     def get_ai_close_decision_v2(self, pair, trade):
         """BOUNCE-PROOF 3-LAYER EXIT V2 + PEAK-HARVEST LOGIC – PAPER TRADING VERSION"""
-    try:
-        current_price = self.get_current_price(pair)
-        current_pnl = self.calculate_current_pnl(trade, current_price)
-        
-        # Peak PnL tracking
-        if 'peak_pnl' not in trade:
-            trade['peak_pnl'] = current_pnl
-        if current_pnl > trade['peak_pnl']:
-            trade['peak_pnl'] = current_pnl
-        
-        peak = trade['peak_pnl']
-        
-        # ==================== 🆕 PEAK-HARVEST LOGIC ====================
-        # မင်းပြောသလို Peak ရောက်တာနဲ့ 50-70% ချက်ချင်းပိတ်မယ်
-        peak_margin_pct = (peak / 100)  # margin ပေါ် % ကို ပြန်တွက်
-        
-        if not trade.get('peak_harvested', False):
-            if peak >= 12.0:  # 12% ကျော်ရင်
+        try:
+            current_price = self.real_bot.get_current_price(pair)
+            current_pnl = self.calculate_current_pnl(trade, current_price)
+            
+            # Peak PnL tracking
+            if 'peak_pnl' not in trade:
+                trade['peak_pnl'] = current_pnl
+            if current_pnl > trade['peak_pnl']:
+                trade['peak_pnl'] = current_pnl
+            
+            peak = trade['peak_pnl']
+            
+            # ==================== 🆕 PEAK-HARVEST LOGIC ====================
+            # Peak ရောက်တာနဲ့ 50-70% ချက်ချင်းပိတ်မယ်
+            if self.peak_harvest_enabled and not trade.get('peak_harvested', False):
+                if peak >= 12.0:  # 12% ကျော်ရင်
+                    trade['peak_harvested'] = True
+                    return {
+                        "should_close": True,
+                        "partial_percent": 70,
+                        "close_type": "PEAK_HARVEST_70",
+                        "reason": f"PAPER PEAK HARVEST: +{peak:.1f}% → 70% ချက်ချင်းပိတ်!",
+                        "confidence": 100
+                    }
+                elif peak >= 10.0:  # 10% ကျော်ရင်
+                    trade['peak_harvested'] = True
+                    return {
+                        "should_close": True,
+                        "partial_percent": 60,
+                        "close_type": "PEAK_HARVEST_60",
+                        "reason": f"PAPER PEAK HARVEST: +{peak:.1f}% → 60% ချက်ချင်းပိတ်!",
+                        "confidence": 100
+                    }
+                elif peak >= 8.0:  # 8% ကျော်ရင်
+                    trade['peak_harvested'] = True
+                    return {
+                        "should_close": True,
+                        "partial_percent": 50,
+                        "close_type": "PEAK_HARVEST_50",
+                        "reason": f"PAPER PEAK HARVEST: +{peak:.1f}% → 50% ချက်ချင်းပိတ်!",
+                        "confidence": 100
+                    }
+            # ==================== PEAK-HARVEST END ====================
+
+            # 1. Hard stop -5% က ဘယ်လိုမှ မလွတ်
+            if current_pnl <= -5.0:
                 return {
-                    "should_close": True,
-                    "partial_percent": 70,
-                    "close_type": "PEAK_HARVEST_70",
-                    "reason": f"PEAK HARVEST: +{peak:.1f}% → 70% ချက်ချင်းပိတ်!",
-                    "confidence": 100
+                    "should_close": True, 
+                    "close_type": "STOP_LOSS", 
+                    "close_reason": "Hard -5% rule", 
+                    "confidence": 100,
+                    "partial_percent": 100
                 }
-            elif peak >= 10.0:  # 10% ကျော်ရင်
+
+            # 2. 60% Partial @ +9%
+            if peak >= 9.0 and not trade.get('partial_done', False):
+                trade['partial_done'] = True
                 return {
                     "should_close": True,
                     "partial_percent": 60,
-                    "close_type": "PEAK_HARVEST_60",
-                    "reason": f"PEAK HARVEST: +{peak:.1f}% → 60% ချက်ချင်းပိတ်!",
-                    "confidence": 100
-                }
-            elif peak >= 8.0:  # 8% ကျော်ရင်
-                return {
-                    "should_close": True,
-                    "partial_percent": 50,
-                    "close_type": "PEAK_HARVEST_50",
-                    "reason": f"PEAK HARVEST: +{peak:.1f}% → 50% ချက်ချင်းပိတ်!",
-                    "confidence": 100
-                }
-        # ==================== PEAK-HARVEST END ====================
-
-        # 1. Hard stop -5% က ဘယ်လိုမှ မလွတ်
-        if current_pnl <= -5.0:
-            return {
-                "should_close": True, 
-                "close_type": "STOP_LOSS", 
-                "close_reason": "Hard -5% rule", 
-                "confidence": 100,
-                "partial_percent": 100
-            }
-
-        # 2. 60% Partial @ +9%
-        if peak >= 9.0 and not trade.get('partial_done', False):
-            trade['partial_done'] = True
-            return {
-                "should_close": True,
-                "partial_percent": 60,
-                "close_type": "PARTIAL_60",
-                "reason": f"LOCK 60% PROFIT @ +{peak:.1f}% → အမြတ် ချက်ချင်း အိတ်ထဲ!",
-                "confidence": 100
-            }
-
-        # 3. Instant Breakeven @ +12%
-        if peak >= 12.0 and not trade.get('breakeven_done', False):
-            trade['breakeven_done'] = True
-            return {
-                "should_close": False,
-                "move_sl_to": trade['entry_price'],
-                "close_type": "BREAKEVEN_ACTIVATED", 
-                "reason": f"Peak +{peak:.1f}% → ကျန် 40% ကို BREAKEVEN ချပြီး → ဘယ်လိုမှ မရှုံးနိုင်တော့ဘူး!",
-                "confidence": 100
-            }
-
-        # 4. Dynamic Profit Floor (75% of Peak)
-        if peak >= 15.0:
-            profit_floor = peak * 0.75
-            if current_pnl <= profit_floor and trade.get('partial_done', False):
-                return {
-                    "should_close": True,
-                    "partial_percent": 100,
-                    "close_type": "PROFIT_FLOOR_HIT",
-                    "reason": f"Peak {peak:.1f}% → 75% floor ({profit_floor:.1f}%) ထိပြီး → ကျန်အကုန် အမြတ်နဲ့ ပိတ်!",
+                    "close_type": "PARTIAL_60",
+                    "reason": f"PAPER: Lock 60% profit @ +{peak:.1f}%",
                     "confidence": 100
                 }
 
-        # 5. 2×ATR Trailing
-        if trade.get('partial_done', False) and peak >= 9.0:
-            atr_14 = 0.001
-            try:
-                if self.binance:
-                    klines = self.binance.futures_klines(symbol=pair, interval='1h', limit=50)
-                    if len(klines) >= 15:
-                        highs = [float(k[2]) for k in klines]
-                        lows = [float(k[3]) for k in klines]
-                        closes = [float(k[4]) for k in klines]
-                        tr = [max(highs[i]-lows[i], abs(highs[i]-closes[i-1]), abs(lows[i]-closes[i-1])) for i in range(1, len(klines))]
-                        atr_14 = sum(tr[-14:]) / 14
-            except: 
-                pass
-            
-            trail_price = current_price + (2 * atr_14) if trade['direction'] == 'LONG' else current_price - (2 * atr_14)
-            if trade['direction'] == 'LONG' and current_price <= trail_price:
+            # 3. Instant Breakeven @ +12%
+            if peak >= 12.0 and not trade.get('breakeven_done', False):
+                trade['breakeven_done'] = True
                 return {
-                    "should_close": True, 
-                    "partial_percent": 100, 
-                    "close_type": "TRAILING_HIT", 
-                    "reason": "2×ATR Trailing ထိပြီး ထွက်",
-                    "confidence": 95
-                }
-            if trade['direction'] == 'SHORT' and current_price >= trail_price:
-                return {
-                    "should_close": True, 
-                    "partial_percent": 100, 
-                    "close_type": "TRAILING_HIT", 
-                    "reason": "2×ATR Trailing ထိပြီး ထွက်",
-                    "confidence": 95
+                    "should_close": False,
+                    "move_sl_to": trade['entry_price'],
+                    "close_type": "BREAKEVEN_ACTIVATED",
+                    "reason": f"PAPER: Breakeven activated @ +{peak:.1f}%",
+                    "confidence": 100
                 }
 
-        return {"should_close": False}
+            # 4. Dynamic Profit Floor (75% of Peak)
+            if peak >= 15.0:
+                profit_floor = peak * 0.75
+                if current_pnl <= profit_floor and trade.get('partial_done', False):
+                    return {
+                        "should_close": True,
+                        "partial_percent": 100,
+                        "close_type": "PROFIT_FLOOR_HIT",
+                        "reason": f"PAPER: Profit floor hit {profit_floor:.1f}%",
+                        "confidence": 100
+                    }
 
-    except Exception as e:
-        return {"should_close": False}
+            # 5. 2×ATR Trailing
+            if trade.get('partial_done', False) and peak >= 9.0:
+                atr_14 = 0.001
+                trail_price = current_price + (2 * atr_14) if trade['direction'] == 'LONG' else current_price - (2 * atr_14)
+                if trade['direction'] == 'LONG' and current_price <= trail_price:
+                    return {
+                        "should_close": True, 
+                        "partial_percent": 100, 
+                        "close_type": "TRAILING_HIT", 
+                        "reason": "PAPER: 2×ATR Trailing",
+                        "confidence": 95
+                    }
+                if trade['direction'] == 'SHORT' and current_price >= trail_price:
+                    return {
+                        "should_close": True, 
+                        "partial_percent": 100, 
+                        "close_type": "TRAILING_HIT", 
+                        "reason": "PAPER: 2×ATR Trailing",
+                        "confidence": 95
+                    }
+
+            return {"should_close": False}
+
+        except Exception as e:
+            return {"should_close": False}
+
     def paper_execute_trade(self, pair, ai_decision):
         """Execute paper trade WITHOUT TP/SL orders"""
         try:
@@ -2107,7 +2115,7 @@ class FullyAutonomous1HourPaperTrader:
             direction_color = self.Fore.GREEN + self.Style.BRIGHT if decision == 'LONG' else self.Fore.RED + self.Style.BRIGHT
             direction_icon = "🟢 LONG" if decision == 'LONG' else "🔴 SHORT"
             
-            self.real_bot.print_color(f"\n🤖 PAPER TRADE EXECUTION (BOUNCE-PROOF V2)", self.Fore.CYAN + self.Style.BRIGHT)
+            self.real_bot.print_color(f"\n🤖 PAPER TRADE EXECUTION (BOUNCE-PROOF V2 + PEAK-HARVEST)", self.Fore.CYAN + self.Style.BRIGHT)
             self.real_bot.print_color("=" * 80, self.Fore.CYAN)
             self.real_bot.print_color(f"{direction_icon} {pair}", direction_color)
             self.real_bot.print_color(f"POSITION SIZE: ${position_size_usd:.2f}", self.Fore.GREEN + self.Style.BRIGHT)
@@ -2115,6 +2123,7 @@ class FullyAutonomous1HourPaperTrader:
             self.real_bot.print_color(f"ENTRY PRICE: ${entry_price:.4f}", self.Fore.WHITE)
             self.real_bot.print_color(f"QUANTITY: {quantity}", self.Fore.CYAN)
             self.real_bot.print_color(f"🎯 BOUNCE-PROOF 3-LAYER EXIT V2 ACTIVE", self.Fore.YELLOW + self.Style.BRIGHT)
+            self.real_bot.print_color(f"🚀 PEAK-HARVEST LOGIC: ENABLED", self.Fore.GREEN + self.Style.BRIGHT)
             self.real_bot.print_color(f"CONFIDENCE: {confidence}%", self.Fore.YELLOW + self.Style.BRIGHT)
             self.real_bot.print_color(f"REASONING: {reasoning}", self.Fore.WHITE)
             self.real_bot.print_color("=" * 80, self.Fore.CYAN)
@@ -2135,10 +2144,11 @@ class FullyAutonomous1HourPaperTrader:
                 'ai_reasoning': reasoning,
                 'entry_time_th': self.real_bot.get_thailand_time(),
                 'has_tp_sl': False,  # Mark as no TP/SL
-                'peak_pnl': 0  # NEW: For 3-layer system
+                'peak_pnl': 0,  # NEW: For 3-layer system
+                'peak_harvested': False  # NEW: For Peak-Harvest logic
             }
             
-            self.real_bot.print_color(f"✅ PAPER TRADE EXECUTED (BOUNCE-PROOF V2): {pair} {decision} | Leverage: {leverage}x", self.Fore.GREEN + self.Style.BRIGHT)
+            self.real_bot.print_color(f"✅ PAPER TRADE EXECUTED (BOUNCE-PROOF V2 + PEAK-HARVEST): {pair} {decision} | Leverage: {leverage}x", self.Fore.GREEN + self.Style.BRIGHT)
             return True
             
         except Exception as e:
@@ -2146,16 +2156,16 @@ class FullyAutonomous1HourPaperTrader:
             return False
 
     def monitor_paper_positions(self):
-        """Monitor paper positions and ask AI when to close (BOUNCE-PROOF V2)"""
+        """Monitor paper positions and ask AI when to close (BOUNCE-PROOF V2 + PEAK-HARVEST)"""
         try:
             closed_positions = []
             for pair, trade in list(self.paper_positions.items()):
                 if trade['status'] != 'ACTIVE':
                     continue
                 
-                # Ask AI whether to close this paper position using Bounce-Proof V2
+                # Ask AI whether to close this paper position using Bounce-Proof V2 + Peak-Harvest
                 if not trade.get('has_tp_sl', True):
-                    self.real_bot.print_color(f"🔍 PAPER Bounce-Proof V2 Checking {pair}...", self.Fore.BLUE)
+                    self.real_bot.print_color(f"🔍 PAPER Bounce-Proof V2 + Peak-Harvest Checking {pair}...", self.Fore.BLUE)
                     close_decision = self.get_ai_close_decision_v2(pair, trade)
                     
                     if close_decision.get("should_close", False):
@@ -2165,9 +2175,9 @@ class FullyAutonomous1HourPaperTrader:
                         partial_percent = close_decision.get("partial_percent", 100)
                         
                         # 🆕 Use Bounce-Proof V2's ACTUAL reasoning for closing
-                        full_close_reason = f"BOUNCE-PROOF V2: {close_type} - {reasoning}"
+                        full_close_reason = f"BOUNCE-PROOF V2 + PEAK-HARVEST: {close_type} - {reasoning}"
                         
-                        self.real_bot.print_color(f"🎯 PAPER Bounce-Proof V2 Decision: CLOSE {pair}", self.Fore.YELLOW + self.Style.BRIGHT)
+                        self.real_bot.print_color(f"🎯 PAPER Bounce-Proof V2 + Peak-Harvest Decision: CLOSE {pair}", self.Fore.YELLOW + self.Style.BRIGHT)
                         self.real_bot.print_color(f"📝 Close Type: {close_type} | Partial: {partial_percent}%", self.Fore.CYAN)
                         self.real_bot.print_color(f"💡 Confidence: {confidence}% | Reasoning: {reasoning}", self.Fore.WHITE)
                         
@@ -2179,13 +2189,13 @@ class FullyAutonomous1HourPaperTrader:
                         # Show Bounce-Proof V2's decision to hold with reasoning
                         if close_decision.get('confidence', 0) > 0:
                             reasoning = close_decision.get('reasoning', 'No reason provided')
-                            self.real_bot.print_color(f"🔍 PAPER Bounce-Proof V2 wants to HOLD {pair} (Confidence: {close_decision.get('confidence', 0)}%)", self.Fore.GREEN)
+                            self.real_bot.print_color(f"🔍 PAPER Bounce-Proof V2 + Peak-Harvest wants to HOLD {pair} (Confidence: {close_decision.get('confidence', 0)}%)", self.Fore.GREEN)
                             self.real_bot.print_color(f"📝 Hold Reasoning: {reasoning}", self.Fore.WHITE)
                     
             return closed_positions
                     
         except Exception as e:
-            self.real_bot.print_color(f"PAPER: Bounce-Proof V2 Monitoring error: {e}", self.Fore.RED)
+            self.real_bot.print_color(f"PAPER: Bounce-Proof V2 + Peak-Harvest Monitoring error: {e}", self.Fore.RED)
             return []
 
     def display_paper_dashboard(self):
@@ -2193,6 +2203,7 @@ class FullyAutonomous1HourPaperTrader:
         self.real_bot.print_color(f"\n🤖 PAPER TRADING DASHBOARD - {self.real_bot.get_thailand_time()}", self.Fore.CYAN + self.Style.BRIGHT)
         self.real_bot.print_color("=" * 90, self.Fore.CYAN)
         self.real_bot.print_color(f"🎯 MODE: BOUNCE-PROOF 3-LAYER EXIT V2", self.Fore.YELLOW + self.Style.BRIGHT)
+        self.real_bot.print_color(f"🚀 PEAK-HARVEST LOGIC: ENABLED", self.Fore.GREEN + self.Style.BRIGHT)
         self.real_bot.print_color(f"⏰ MONITORING: 3 MINUTE INTERVAL", self.Fore.RED + self.Style.BRIGHT)
         self.real_bot.print_color(f"📡 USING REAL BINANCE MARKET DATA", self.Fore.BLUE + self.Style.BRIGHT)
         
@@ -2218,7 +2229,7 @@ class FullyAutonomous1HourPaperTrader:
                 self.real_bot.print_color(f"   Size: ${trade['position_size_usd']:.2f} | Leverage: {trade['leverage']}x ⚡", self.Fore.WHITE)
                 self.real_bot.print_color(f"   Entry: ${trade['entry_price']:.4f} | Current: ${current_price:.4f}", self.Fore.WHITE)
                 self.real_bot.print_color(f"   P&L: ${unrealized_pnl:.2f}", pnl_color)
-                self.real_bot.print_color(f"   🎯 BOUNCE-PROOF V2 EXIT ACTIVE", self.Fore.YELLOW)
+                self.real_bot.print_color(f"   🎯 BOUNCE-PROOF V2 + PEAK-HARVEST ACTIVE", self.Fore.YELLOW)
                 self.real_bot.print_color("   " + "-" * 60, self.Fore.CYAN)
         
         if active_count == 0:
@@ -2289,7 +2300,7 @@ class FullyAutonomous1HourPaperTrader:
     def run_paper_trading_cycle(self):
         """Run paper trading cycle"""
         try:
-            # First monitor and ask AI to close paper positions using Bounce-Proof V2
+            # First monitor and ask AI to close paper positions using Bounce-Proof V2 + Peak-Harvest
             self.monitor_paper_positions()
             self.display_paper_dashboard()
             
@@ -2337,10 +2348,11 @@ class FullyAutonomous1HourPaperTrader:
 
     def start_paper_trading(self):
         """Start paper trading"""
-        self.real_bot.print_color("🚀 STARTING PAPER TRADING WITH BOUNCE-PROOF 3-LAYER EXIT V2!", self.Fore.CYAN + self.Style.BRIGHT)
+        self.real_bot.print_color("🚀 STARTING PAPER TRADING WITH BOUNCE-PROOF 3-LAYER EXIT V2 + PEAK-HARVEST!", self.Fore.CYAN + self.Style.BRIGHT)
         self.real_bot.print_color("💰 VIRTUAL $500 PORTFOLIO", self.Fore.GREEN + self.Style.BRIGHT)
         self.real_bot.print_color("🔄 REVERSE POSITION: ENABLED", self.Fore.MAGENTA + self.Style.BRIGHT)
         self.real_bot.print_color("🎯 BOUNCE-PROOF 3-LAYER EXIT V2: ACTIVE", self.Fore.YELLOW + self.Style.BRIGHT)
+        self.real_bot.print_color("🚀 PEAK-HARVEST LOGIC: ACTIVE (Peak ရောက်တာနဲ့ 50-70% ချက်ချင်းပိတ်)", self.Fore.GREEN + self.Style.BRIGHT)
         self.real_bot.print_color("⏰ MONITORING: 3 MINUTE INTERVAL", self.Fore.RED + self.Style.BRIGHT)
         self.real_bot.print_color("📡 USING REAL BINANCE MARKET DATA", self.Fore.BLUE + self.Style.BRIGHT)
         
@@ -2348,10 +2360,10 @@ class FullyAutonomous1HourPaperTrader:
         while True:
             try:
                 self.paper_cycle_count += 1
-                self.real_bot.print_color(f"\n🔄 PAPER TRADING CYCLE {self.paper_cycle_count} (BOUNCE-PROOF V2)", self.Fore.CYAN + self.Style.BRIGHT)
+                self.real_bot.print_color(f"\n🔄 PAPER TRADING CYCLE {self.paper_cycle_count} (BOUNCE-PROOF V2 + PEAK-HARVEST)", self.Fore.CYAN + self.Style.BRIGHT)
                 self.real_bot.print_color("=" * 60, self.Fore.CYAN)
                 self.run_paper_trading_cycle()
-                self.real_bot.print_color(f"⏳ Next Bounce-Proof V2 analysis in 3 minute...", self.Fore.BLUE)
+                self.real_bot.print_color(f"⏳ Next Bounce-Proof V2 + Peak-Harvest analysis in 3 minute...", self.Fore.BLUE)
                 time.sleep(self.monitoring_interval)
                 
             except KeyboardInterrupt:
@@ -2373,15 +2385,15 @@ if __name__ == "__main__":
         print("\n" + "="*70)
         print("🤖 FULLY AUTONOMOUS 1-HOUR AI TRADER")
         print("="*70)
-        print("1. 🎯 REAL TRADING (Live Binance Account)")
-        print("2. 📝 PAPER TRADING (Virtual Simulation)")
+        print("1. 🎯 REAL TRADING (Live Binance Account) - BOUNCE-PROOF V2 + PEAK-HARVEST")
+        print("2. 📝 PAPER TRADING (Virtual Simulation) - BOUNCE-PROOF V2 + PEAK-HARVEST")
         print("3. ❌ EXIT")
         
         choice = input("\nSelect mode (1-3): ").strip()
         
         if choice == "1":
             if bot.binance:
-                print(f"\n🚀 STARTING REAL TRADING WITH BOUNCE-PROOF V2...")
+                print(f"\n🚀 STARTING REAL TRADING WITH BOUNCE-PROOF V2 + PEAK-HARVEST...")
                 bot.start_trading()
             else:
                 print(f"\n❌ Binance connection failed. Switching to paper trading...")
@@ -2389,7 +2401,7 @@ if __name__ == "__main__":
                 paper_bot.start_paper_trading()
                 
         elif choice == "2":
-            print(f"\n📝 STARTING PAPER TRADING WITH BOUNCE-PROOF V2...")
+            print(f"\n📝 STARTING PAPER TRADING WITH BOUNCE-PROOF V2 + PEAK-HARVEST...")
             paper_bot = FullyAutonomous1HourPaperTrader(bot)
             paper_bot.start_paper_trading()
             
