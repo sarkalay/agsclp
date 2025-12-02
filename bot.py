@@ -106,9 +106,6 @@ def should_close_trade(trade, current_price, atr_14):
         if trade['direction'] == 'SHORT' and current_price >= trail_price:
             return {"should_close": True, "partial_percent": 100, "close_type": "TRAILING_HIT", "reason": "2×ATR Trailing ထိပြီး ထွက်"}
 
-    # ==================== ၅. Winner-Turn-Loser = လုံးဝ မရှိတော့ဘူး ====================
-    # ❌❌❌ ဒီတစ်ကြောင်းကို လုံးဝ ဖျက်ထားပြီး → တစ်ခါမှ အမြတ်ပြန်မပေးတော့ဘူး
-
     return {"should_close": False}  # မပိတ်သေးဘူး
 
 # Use conditional inheritance with proper method placement
@@ -133,57 +130,6 @@ else:
                 'improvement_areas': []
             }
             self._initialize_trading()
-
-# === MULTI-TIMEFRAME INDICATORS ===
-def calculate_ema(self, data, period):
-    """Calculate Exponential Moving Average"""
-    if len(data) < period:
-        return [None] * len(data)
-    df = pd.Series(data)
-    return df.ewm(span=period, adjust=False).mean().tolist()
-
-def calculate_rsi(self, data, period=14):
-    """Calculate Relative Strength Index"""
-    if len(data) < period + 1:
-        return [50] * len(data)
-    df = pd.Series(data)
-    delta = df.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(50).tolist()
-
-def calculate_volume_spike(self, volumes, window=10):
-    """Calculate if current volume is a spike"""
-    if len(volumes) < window + 1:
-        return False
-    avg_vol = np.mean(volumes[-window-1:-1])
-    current_vol = volumes[-1]
-    return current_vol > avg_vol * 1.8
-
-def validate_api_keys(self):
-    """Validate all API keys at startup"""
-    issues = []
-    
-    if not self.binance_api_key or self.binance_api_key == "your_binance_api_key_here":
-        issues.append("Binance API Key not configured")
-    
-    if not self.binance_secret or self.binance_secret == "your_binance_secret_key_here":
-        issues.append("Binance Secret Key not configured")
-        
-    if not self.openrouter_key or self.openrouter_key == "your_openrouter_api_key_here":
-        issues.append("OpenRouter API Key not configured - AI will use fallback decisions")
-    
-    if issues:
-        self.print_color("🚨 CONFIGURATION ISSUES FOUND:", self.Fore.RED + self.Style.BRIGHT)
-        for issue in issues:
-            self.print_color(f"   ❌ {issue}", self.Fore.RED)
-        
-        if "OpenRouter" in str(issues):
-            self.print_color("   💡 Without OpenRouter, AI will use technical analysis fallback only", self.Fore.YELLOW)
-    
-    return len(issues) == 0
 
 # Common trading initialization for both cases
 def _initialize_trading(self):
@@ -261,7 +207,57 @@ def _initialize_trading(self):
 # Add the method to both classes
 FullyAutonomous1HourAITrader._initialize_trading = _initialize_trading
 
-# Now add all the other methods to the class
+# === MULTI-TIMEFRAME INDICATORS ===
+def calculate_ema(self, data, period):
+    """Calculate Exponential Moving Average"""
+    if len(data) < period:
+        return [None] * len(data)
+    df = pd.Series(data)
+    return df.ewm(span=period, adjust=False).mean().tolist()
+
+def calculate_rsi(self, data, period=14):
+    """Calculate Relative Strength Index"""
+    if len(data) < period + 1:
+        return [50] * len(data)
+    df = pd.Series(data)
+    delta = df.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.fillna(50).tolist()
+
+def calculate_volume_spike(self, volumes, window=10):
+    """Calculate if current volume is a spike"""
+    if len(volumes) < window + 1:
+        return False
+    avg_vol = np.mean(volumes[-window-1:-1])
+    current_vol = volumes[-1]
+    return current_vol > avg_vol * 1.8
+
+def validate_api_keys(self):
+    """Validate all API keys at startup"""
+    issues = []
+    
+    if not self.binance_api_key or self.binance_api_key == "your_binance_api_key_here":
+        issues.append("Binance API Key not configured")
+    
+    if not self.binance_secret or self.binance_secret == "your_binance_secret_key_here":
+        issues.append("Binance Secret Key not configured")
+        
+    if not self.openrouter_key or self.openrouter_key == "your_openrouter_api_key_here":
+        issues.append("OpenRouter API Key not configured - AI will use fallback decisions")
+    
+    if issues:
+        self.print_color("🚨 CONFIGURATION ISSUES FOUND:", self.Fore.RED + self.Style.BRIGHT)
+        for issue in issues:
+            self.print_color(f"   ❌ {issue}", self.Fore.RED)
+        
+        if "OpenRouter" in str(issues):
+            self.print_color("   💡 Without OpenRouter, AI will use technical analysis fallback only", self.Fore.YELLOW)
+    
+    return len(issues) == 0
+
 def load_real_trade_history(self):
     """Load trading history"""
     try:
@@ -813,87 +809,85 @@ def execute_reverse_position(self, pair, ai_decision, current_trade):
         self.print_color(f"❌ Reverse position execution failed: {e}", self.Fore.RED)
         return False
 
-    def close_trade_immediately(self, pair, trade, close_reason="AI_DECISION", partial_percent=100):
-        """Close real trade with CORRECT partial calculation (notional-based)"""
-        try:
-            current_price = self.get_current_price(pair)
+def close_trade_immediately(self, pair, trade, close_reason="AI_DECISION", partial_percent=100):
+    """Close real trade with CORRECT partial calculation (notional-based)"""
+    try:
+        current_price = self.get_current_price(pair)
 
-            # === NOTIONAL-BASED CORRECT CALCULATION ===
-            notional_value = trade['position_size_usd'] * trade['leverage']
-            closed_notional = notional_value * (partial_percent / 100.0)
-            closed_quantity = closed_notional / current_price
-            closed_position_size = closed_notional / trade['leverage']  # Margin released
+        # === NOTIONAL-BASED CORRECT CALCULATION ===
+        notional_value = trade['position_size_usd'] * trade['leverage']
+        closed_notional = notional_value * (partial_percent / 100.0)
+        closed_quantity = closed_notional / current_price
+        closed_position_size = closed_notional / trade['leverage']  # Margin released
 
-            closed_quantity = round(closed_quantity, 6)
-            closed_position_size = round(closed_position_size, 3)
+        closed_quantity = round(closed_quantity, 6)
+        closed_position_size = round(closed_position_size, 3)
 
-            remaining_quantity = trade['quantity'] - closed_quantity
-            remaining_position_size = trade['position_size_usd'] - closed_position_size
+        remaining_quantity = trade['quantity'] - closed_quantity
+        remaining_position_size = trade['position_size_usd'] - closed_position_size
 
-            trade['quantity'] = round(remaining_quantity, 6)
-            trade['position_size_usd'] = round(remaining_position_size, 3)
+        trade['quantity'] = round(remaining_quantity, 6)
+        trade['position_size_usd'] = round(remaining_position_size, 3)
 
-            # P&L calculation (accurate)
-            if trade['direction'] == 'LONG':
-                pnl = (current_price - trade['entry_price']) * closed_quantity
-            else:
-                pnl = (trade['entry_price'] - current_price) * closed_quantity
+        # P&L calculation (accurate)
+        if trade['direction'] == 'LONG':
+            pnl = (current_price - trade['entry_price']) * closed_quantity
+        else:
+            pnl = (trade['entry_price'] - current_price) * closed_quantity
 
-            peak_pnl_pct = trade.get('peak_pnl', 0)
+        peak_pnl_pct = trade.get('peak_pnl', 0)
 
-            # === PARTIAL CLOSE ===
-            if partial_percent < 100:
-                partial_trade = trade.copy()
-                partial_trade.update({
-                    'status': 'PARTIAL_CLOSE',
-                    'exit_price': current_price,
-                    'pnl': round(pnl, 4),
-                    'close_reason': close_reason,
-                    'close_time': self.get_thailand_time(),
-                    'partial_percent': partial_percent,
-                    'closed_quantity': closed_quantity,
-                    'closed_position_size': closed_position_size,
-                    'peak_pnl_pct': round(peak_pnl_pct, 3)
-                })
+        # === PARTIAL CLOSE ===
+        if partial_percent < 100:
+            partial_trade = trade.copy()
+            partial_trade.update({
+                'status': 'PARTIAL_CLOSE',
+                'exit_price': current_price,
+                'pnl': round(pnl, 4),
+                'close_reason': close_reason,
+                'close_time': self.get_thailand_time(),
+                'partial_percent': partial_percent,
+                'closed_quantity': closed_quantity,
+                'closed_position_size': closed_position_size,
+                'peak_pnl_pct': round(peak_pnl_pct, 3)
+            })
 
-                self.available_budget += closed_position_size + pnl
-                self.add_trade_to_history(partial_trade)
+            self.available_budget += closed_position_size + pnl
+            self.add_trade_to_history(partial_trade)
 
-                color = self.Fore.GREEN if pnl > 0 else self.Fore.RED
-                self.print_color(f"Partial Close | {pair} | {partial_percent}% | "
-                                 f"Closed: {closed_quantity:.6f} (${closed_position_size:.2f} margin) | "
-                                 f"P&L: ${pnl:+.2f} | {close_reason}", color)
-                self.print_color(f"Remaining: {remaining_quantity:.6f} (${trade['position_size_usd']:.2f} margin)", self.Fore.CYAN)
-                return True
+            color = self.Fore.GREEN if pnl > 0 else self.Fore.RED
+            self.print_color(f"Partial Close | {pair} | {partial_percent}% | "
+                             f"Closed: {closed_quantity:.6f} (${closed_position_size:.2f} margin) | "
+                             f"P&L: ${pnl:+.2f} | {close_reason}", color)
+            self.print_color(f"Remaining: {remaining_quantity:.6f} (${trade['position_size_usd']:.2f} margin)", self.Fore.CYAN)
+            return True
 
-            # === FULL CLOSE ===
-            else:
-                trade.update({
-                    'status': 'CLOSED',
-                    'exit_price': current_price,
-                    'pnl': round(pnl, 4),
-                    'close_reason': close_reason,
-                    'close_time': self.get_thailand_time(),
-                    'partial_percent': 100,
-                    'peak_pnl_pct': round(peak_pnl_pct, 3)
-                })
+        # === FULL CLOSE ===
+        else:
+            trade.update({
+                'status': 'CLOSED',
+                'exit_price': current_price,
+                'pnl': round(pnl, 4),
+                'close_reason': close_reason,
+                'close_time': self.get_thailand_time(),
+                'partial_percent': 100,
+                'peak_pnl_pct': round(peak_pnl_pct, 3)
+            })
 
-                self.available_budget += trade['position_size_usd'] + pnl
-                self.add_trade_to_history(trade.copy())
+            self.available_budget += trade['position_size_usd'] + pnl
+            self.add_trade_to_history(trade.copy())
 
-                color = self.Fore.GREEN if pnl > 0 else self.Fore.RED
-                self.print_color(f"Full Close | {pair} | P&L: ${pnl:+.2f} | {close_reason}", color)
+            color = self.Fore.GREEN if pnl > 0 else self.Fore.RED
+            self.print_color(f"Full Close | {pair} | P&L: ${pnl:+.2f} | {close_reason}", color)
 
-                if pair in self.ai_opened_trades:
-                    del self.ai_opened_trades.pop(pair, None)
-                if pair in self.checked_3percent_levels:
-                    del self.checked_3percent_levels[pair]
+            if pair in self.ai_opened_trades:
+                del self.ai_opened_trades[pair]
 
-                return True
+            return True
 
-        except Exception as e:
-            self.print_color(f"Close failed: {e}", self.Fore.RED)
-            return False
+    except Exception as e:
+        self.print_color(f"Close failed: {e}", self.Fore.RED)
+        return False
 
 def get_current_price(self, pair):
     """Get real price from Binance API (no mock prices)"""
@@ -1835,7 +1829,7 @@ class FullyAutonomous1HourPaperTrader:
             self.real_bot.print_color(f"❌ PAPER: Reverse position execution failed: {e}", self.Fore.RED)
             return False
 
-        def paper_close_trade_immediately(self, pair, trade, close_reason="AI_DECISION", partial_percent=100):
+    def paper_close_trade_immediately(self, pair, trade, close_reason="AI_DECISION", partial_percent=100):
         """Close paper trade with CORRECT partial calculation"""
         try:
             current_price = self.real_bot.get_current_price(pair)
@@ -1903,8 +1897,6 @@ class FullyAutonomous1HourPaperTrader:
 
                 if pair in self.paper_positions:
                     self.paper_positions.pop(pair, None)
-                if pair in self.checked_3percent_levels:
-                    del self.checked_3percent_levels[pair]
 
                 return True
 
